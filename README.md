@@ -51,6 +51,26 @@ npm run dev
 
 The frontend application will open in your browser at `http://localhost:3000`.
 
+## 🤝 Running Both Frontend and Backend (Monorepo Setup)
+
+If you're setting up the entire `Lost-Found-System` project from its root directory, here's how to run both the frontend and backend simultaneously:
+
+1.  **Ensure your backend server is running.** Please refer to the [Backend README](../backend/README.md) for detailed instructions on how to set up and run the FastAPI backend.
+
+2.  **Open a new terminal window** (separate from where your backend is running).
+
+3.  **Navigate to the `frontend` directory:**
+    ```bash
+    cd /path/to/Lost-Found-System/frontend
+    ```
+
+4.  **Start the Next.js development server:**
+    ```bash
+    npm run dev
+    ```
+
+This approach allows you to develop both parts of the application concurrently, with the frontend automatically connecting to the running backend API.
+
 ## 📁 Project Structure
 
 -   `app/`: Contains the main Next.js pages, layouts, and server actions.
