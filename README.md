@@ -2,6 +2,29 @@
 
 Welcome to the user-facing part of the Lost & Found System! This Next.js application provides a modern and responsive interface for reporting and finding lost items or people.
 
+## 🏁 Getting Started
+
+To get started with the Lost & Found System, follow these steps:
+
+1.  **Create a New Project Directory (if you haven't already):**
+    ```bash
+    mkdir Lost-Found-System
+    cd Lost-Found-System
+    ```
+
+2.  **Clone the Frontend Repository:**
+    ```bash
+    git clone https://github.com/UnsettledAverage73/Lost-Found-System-frontend frontend
+    ```
+
+3.  **Clone the Backend Repository (if you haven't already):**
+    ```bash
+    git clone https://github.com/UnsettledAverage73/Lost-found-system-backend backend
+    ```
+
+4.  **Continue with the Frontend Setup:**
+    Now, proceed with the [Frontend Setup](#🛠️-setup) instructions below.
+
 ## ✨ Features
 
 -   **🔐 User Authentication:** Seamless sign-in and sign-up flows with protected routes.
