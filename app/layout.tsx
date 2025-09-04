@@ -12,7 +12,7 @@ import { LanguageProvider } from "@/components/language-provider"
 import { Suspense } from "react"
 import MobileQuickActions from "@/components/mobile-quick-actions"
 import { OfflineQueueToaster } from "@/components/offline-queue-toaster"
-import { AuthProvider } from "@/lib/auth"; // Import the AuthProvider
+import { AuthProvider } from "@/lib/auth"
 
 export const metadata: Metadata = {
   title: "LOFT – Smart Lost & Found",
@@ -30,7 +30,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}>
         <Suspense fallback={<div>Loading...</div>}>
-          <AuthProvider> {/* Wrap with AuthProvider */}
+          <AuthProvider>
             <LanguageProvider>
               <OfflineBanner />
               <Navbar />

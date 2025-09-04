@@ -1,4 +1,9 @@
-@import "tailwindcss";
+/* frontend/app/globals.css */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
@@ -92,6 +97,8 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-popover-accent: var(--popover-accent);
+  --color-popover-accent-foreground: var(--popover-accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);

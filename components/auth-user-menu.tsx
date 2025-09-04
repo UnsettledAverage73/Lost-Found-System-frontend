@@ -3,14 +3,14 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { User } from "lucide-react"
-import { useAuth } from "@/lib/auth"; // Import useAuth hook
+import { LogOut, User as UserIcon } from "lucide-react"
+import { useAuth } from "@/lib/auth"
 
 export function AuthUserMenu() {
   const { user, isAuthenticated, logout, loading } = useAuth();
 
   if (loading) {
-    return <div>Loading...</div>; // Or a skeleton loader
+    return <div className="animate-pulse w-24 h-10 bg-gray-200 rounded-md dark:bg-gray-700"></div>; // Simple placeholder for loading
   }
 
   if (!isAuthenticated) {
@@ -28,14 +28,14 @@ export function AuthUserMenu() {
 
   async function handleSignOut() {
     logout();
-    window.location.href = "/"; // Redirect to home after logout
+    window.location.href = "/"; 
   }
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" className="h-9 px-3 flex items-center gap-2 bg-transparent">
-          <User className="h-4 w-4" />
+          <UserIcon className="h-4 w-4" />
           <span className="hidden sm:inline">{user?.username}</span>
         </Button>
       </DropdownMenuTrigger>

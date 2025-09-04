@@ -1,198 +1,229 @@
-"use client"
+"use client";
 
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { runMatching, setMatchStatus } from "@/app/actions/matching"
-import { listReports } from "@/app/actions/reports"; // Assuming listReports is still relevant
-import ProtectedRoute from "@/components/protected-route"; // Import ProtectedRoute
-import useSWR from 'swr'; // Import useSWR
-import { useState, useEffect, useMemo } from 'react'; // Import useState, useEffect, useMemo
-import { useAuth } from "@/lib/auth"; // Import useAuth to get user_id
+import { useState, useEffect } from 'react';
+import useSWR from 'swr'; // For data fetching
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ProtectedRoute } from '@/components/protected-route'; // Import ProtectedRoute
+import { listReports } from '@/app/actions/reports'; // Import server action for reports
+import { useAuth } from '@/lib/auth'; // Import useAuth to get the token for WebSocket
+import { useRouter } from 'next/navigation';
 
-const BACKEND_API_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL;
-const WEBSOCKET_URL = process.env.NEXT_PUBLIC_BACKEND_WEBSOCKET_URL || "ws://localhost:8000/ws"; // Default WebSocket URL
-
-const fetchReports = async () => {
-  try {
-    const response = await fetch(`${BACKEND_API_URL}/reports?status=OPEN`); // Fetch open reports
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || "Failed to fetch reports");
-    }
-    const data = await response.json();
-    return data || [];
-  } catch (error) {
-    console.error("Error fetching reports:", error);
-    return [];
-  }
+interface Report {
+  _id: string;
+  type: 'LOST' | 'FOUND';
+  subject_type: 'PERSON' | 'ITEM';
+  ref_ids: string[];
+  description_text: string;
+  language: string;
+  photo_ids: string[]; // These are GridFS IDs now
+  location: string;
+  status: 'OPEN' | 'MATCHED' | 'REUNITED' | 'CLOSED';
+  created_at: string; // ISO 8601 string
 }
 
-const fetchMatches = async () => {
-  try {
-    const response = await fetch(`${BACKEND_API_URL}/matches?status=PENDING`); // Fetch pending matches
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || "Failed to fetch matches");
-    }
-    const data = await response.json();
-    return data || [];
-  } catch (error) {
-    console.error("Error fetching matches:", error);
-    return [];
-  }
+interface Match {
+  _id: string;
+  lost_report_id: string;
+  found_report_id: string;
+  scores: { [key: string]: number };
+  fused_score: number;
+  status: 'PENDING' | 'CONFIRMED_REUNITED' | 'FALSE_MATCH';
+  created_at: string;
 }
 
-function AdminPage() {
-  const { data: reports = [], mutate: mutateReports } = useSWR("reports", fetchReports)
-  const { data: matches = [], mutate: mutateMatches } = useSWR("matches", fetchMatches)
-  const [q, setQ] = useState("")
-  const { user } = useAuth(); // Get user from auth context
+// Define your backend API URL
+const BACKEND_API_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:8000';
+const WEBSOCKET_URL = process.env.NEXT_PUBLIC_WEBSOCKET_URL || 'ws://localhost:8000';
 
+// Fetcher for SWR
+const fetcher = async (url: string, token: string | null) => {
+  if (!token) throw new Error('No authentication token found.');
+  const response = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || 'Failed to fetch data');
+  }
+  return response.json();
+};
+
+export default function AdminPage() {
+  const { token, user, isAuthenticated } = useAuth();
+  const router = useRouter();
+
+  // SWR hooks for fetching reports and matches
+  const { data: rawLostReports, error: lostReportsError, isLoading: lostReportsLoading, mutate: mutateLostReports } = useSWR(
+    isAuthenticated && token ? [`${BACKEND_API_URL}/reports/?type=lost`, token] : null,
+    ([url, tokenValue]) => fetcher(url, tokenValue)
+  );
+
+  const { data: rawFoundReports, error: foundReportsError, isLoading: foundReportsLoading, mutate: mutateFoundReports } = useSWR(
+    isAuthenticated && token ? [`${BACKEND_API_URL}/reports/?type=found`, token] : null,
+    ([url, tokenValue]) => fetcher(url, tokenValue)
+  );
+
+  const { data: rawMatches, error: matchesError, isLoading: matchesLoading, mutate: mutateMatches } = useSWR(
+    isAuthenticated && token ? [`${BACKEND_API_URL}/matches`, token] : null,
+    ([url, tokenValue]) => fetcher(url, tokenValue)
+  );
+
+  // Ensure data is always an array
+  const lostReports: Report[] = Array.isArray(rawLostReports) ? rawLostReports : [];
+  const foundReports: Report[] = Array.isArray(rawFoundReports) ? rawFoundReports : [];
+  const matches: Match[] = Array.isArray(rawMatches) ? rawMatches : [];
+
+  // WebSocket for real-time match updates
   useEffect(() => {
-    mutateReports();
-    mutateMatches();
-
-    // Establish WebSocket connection for real-time updates
-    let ws: WebSocket | null = null;
-    if (user?.username) {
-      ws = new WebSocket(`${WEBSOCKET_URL}/${user.username}`);
+    let ws: WebSocket;
+    if (isAuthenticated && user?.id) { // Only connect if authenticated and user ID is available
+      ws = new WebSocket(`${WEBSOCKET_URL}/ws/${user.id}`);
 
       ws.onopen = () => {
-        console.log('Admin WebSocket connected');
+        console.log('WebSocket connected for admin dashboard');
       };
 
       ws.onmessage = (event) => {
-        console.log('Admin WebSocket message received:', event.data);
-        // When a new match notification is received, refetch matches
-        if (event.data.startsWith("New match")) {
-          mutateMatches();
-          // No toast for admin, as they see the dashboard directly updating
+        const message = JSON.parse(event.data);
+        if (message.type === 'New match') {
+          console.log('New match received:', message.payload);
+          mutateMatches(); // Revalidate matches data
         }
       };
 
       ws.onclose = () => {
-        console.log('Admin WebSocket disconnected');
+        console.log('WebSocket disconnected for admin dashboard');
       };
 
       ws.onerror = (error) => {
-        console.error('Admin WebSocket error:', error);
+        console.error('WebSocket error:', error);
       };
     }
 
     return () => {
-      if (ws) {
-        ws.close();
-      }
+      ws?.close();
     };
-  }, [mutateReports, mutateMatches, user]); // Reconnect if user changes
+  }, [isAuthenticated, user?.id, mutateMatches]);
 
-  const filtered = useMemo(() => {
-    const s = q.toLowerCase()
-    return !s
-      ? reports
-      : reports.filter(
-          (r: any) =>
-            (r.description_text || "").toLowerCase().includes(s) || // Assuming description_text is the relevant field
-            (r.ref_ids || []).join(" ").toLowerCase().includes(s), // Assuming ref_ids contains searchable text
-        )
-  }, [reports, q])
+  if (lostReportsError || foundReportsError || matchesError) {
+    return <div className="text-red-500 text-center py-4">Failed to load data. Please try again.</div>;
+  }
 
-  return (
-    <main className="container mx-auto max-w-6xl p-4 flex flex-col gap-6">
-      <section className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold text-balance">Volunteer Dashboard</h1>
-        <div className="flex items-center gap-2">
-          <Input placeholder="Search reports..." value={q} onChange={(e) => setQ(e.target.value)} className="w-64" />
-          <Button
-            onClick={async () => {
-              await runMatching()
-              await mutateMatches()
-            }}
-          >
-            Run matching
-          </Button>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Reports {reports ? `(${reports.length})` : ""}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-3 max-h-[60vh] overflow-auto pr-2">
-              {filtered.map((r: any) => (
-                <div key={r.id} className="border rounded p-3 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium">
-                      {r.description_text || "(no description)"} <span className="text-xs text-muted-foreground ml-2">[{r.type}]</span>
-                    </div>
-                    <div className="text-xs">{new Date(r.created_at).toLocaleString()}</div>
-                  </div>
-                  <div className="text-sm text-muted-foreground">{r.description_text}</div>
-                  {r.ref_ids?.length ? <div className="text-xs">Refs: {r.ref_ids.join(", ")}</div> : null}
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="px-2 py-0.5 rounded bg-muted">{r.status}</span>
-                    {r.location ? <span className="px-2 py-0.5 rounded bg-muted">{r.location}</span> : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Matches {matches ? `(${matches.length})` : ""}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-3 max-h-[60vh] overflow-auto pr-2">
-              {matches.map((m: any) => (
-                <div key={m.id} className="border rounded p-3 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium">
-                      {m.lost_report_id || "Lost"} ↔ {m.found_report_id || "Found"} {/* Display IDs for now */}
-                    </div>
-                    <div className="text-xs">{Math.round(m.fused_score * 100)}%</div> {/* Using fused_score */}
-                  </div>
-                  <div className="text-sm text-muted-foreground">{m.status}</div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={async () => {
-                        await setMatchStatus(m.id, "confirmed")
-                        await mutateMatches()
-                      }}
-                    >
-                      Confirm
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={async () => {
-                        await setMatchStatus(m.id, "rejected")
-                        await mutateMatches()
-                      }}
-                    >
-                      Reject
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-    </main>
-  )
-}
-
-export default function ProtectedAdminPage() {
+  // Render content only within ProtectedRoute
   return (
     <ProtectedRoute requiredRole="ADMIN">
-      <AdminPage />
+      <div className="min-h-screen p-8">
+        <h1 className="text-4xl font-bold mb-8">Admin Dashboard</h1>
+
+        <Tabs defaultValue="overview" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="lost-reports">Lost Reports</TabsTrigger>
+            <TabsTrigger value="found-reports">Found Reports</TabsTrigger>
+            <TabsTrigger value="matches">Matches</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Total Lost Reports</CardTitle>
+                <CardDescription>Number of active lost reports</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-bold">{lostReportsLoading ? '...' : lostReports.length || 0}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Total Found Reports</CardTitle>
+                <CardDescription>Number of active found reports</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-bold">{foundReportsLoading ? '...' : foundReports.length || 0}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Pending Matches</CardTitle>
+                <CardDescription>Matches awaiting review</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-bold">{matchesLoading ? '...' : matches.filter(m => m.status === 'PENDING').length || 0}</p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="lost-reports">
+            <h2 className="text-2xl font-bold mb-4">Lost Reports</h2>
+            {lostReportsLoading && <p>Loading lost reports...</p>}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {lostReports.map((report) => (
+                <Card key={report._id}>
+                  <CardHeader>
+                    <CardTitle>{report.description_text}</CardTitle>
+                    <CardDescription>Type: {report.type} | Subject: {report.subject_type}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p>Location: {report.location}</p>
+                    <p>Status: {report.status}</p>
+                    <p>Created: {new Date(report.created_at).toLocaleDateString()}</p>
+                    {/* Add more report details here */}
+                    <Button variant="outline" className="mt-2" onClick={() => router.push(`/report/${report._id}`)}>View Details</Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="found-reports">
+            <h2 className="text-2xl font-bold mb-4">Found Reports</h2>
+            {foundReportsLoading && <p>Loading found reports...</p>}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {foundReports.map((report) => (
+                <Card key={report._id}>
+                  <CardHeader>
+                    <CardTitle>{report.description_text}</CardTitle>
+                    <CardDescription>Type: {report.type} | Subject: {report.subject_type}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p>Location: {report.location}</p>
+                    <p>Status: {report.status}</p>
+                    <p>Created: {new Date(report.created_at).toLocaleDateString()}</p>
+                    {/* Add more report details here */}
+                    <Button variant="outline" className="mt-2" onClick={() => router.push(`/report/${report._id}`)}>View Details</Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="matches">
+            <h2 className="text-2xl font-bold mb-4">Pending Matches</h2>
+            {matchesLoading && <p>Loading matches...</p>}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {matches.filter(m => m.status === 'PENDING').map((match) => (
+                <Card key={match._id}>
+                  <CardHeader>
+                    <CardTitle>Match ID: {match._id}</CardTitle>
+                    <CardDescription>Fused Score: {(match.fused_score * 100).toFixed(2)}%</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p>Lost Report: {match.lost_report_id}</p>
+                    <p>Found Report: {match.found_report_id}</p>
+                    <p>Status: {match.status}</p>
+                    <Button variant="outline" className="mt-2" onClick={() => router.push(`/match/${match._id}`)}>Review Match</Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
     </ProtectedRoute>
   );
 }

@@ -1,79 +1,150 @@
 "use client"
 
-import type React from "react"
+import { useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation'; // Correct import for useRouter in App Router
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { useAuth } from '@/lib/auth'; // Import useAuth hook
+import { setAccessTokenCookie } from '@/app/actions/auth'; // Import the server action
 
-import { useState } from "react"
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { useToast } from "@/hooks/use-toast"
-
-const BACKEND_API_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL;
+// Define your backend API URL
+const BACKEND_API_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:8000';
 
 export default function SignUpPage() {
-  const { toast } = useToast()
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [loading, setLoading] = useState(false)
+  const [contact, setContact] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [role, setRole] = useState<'VOLUNTEER' | 'ADMIN'>('VOLUNTEER');
+  const [consentFaceQr, setConsentFaceQr] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const router = useRouter();
+  const { login } = useAuth(); // Get login function from auth context
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true)
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
 
     try {
       const response = await fetch(`${BACKEND_API_URL}/auth/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json', // FastAPI expects JSON for register endpoint
+        },
         body: JSON.stringify({
-          contact: email, // Using 'contact' as the field for email in UserSchema
-          password: password, // Send password for hashing on backend
-          role: "VOLUNTEER", // Default role for new sign-ups
-          consent_face_qr: false, // Default consent
+          contact,
+          password,
+          role,
+          consent_face_qr: consentFaceQr,
         }),
       });
 
       if (response.ok) {
-        toast({ title: "Signed up", description: "Account created successfully!" });
-        window.location.href = "/auth/sign-in";
+        // Automatically log in the user after successful registration
+        const loginResponse = await fetch(`${BACKEND_API_URL}/auth/token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: `username=${encodeURIComponent(contact)}&password=${encodeURIComponent(password)}`,
+        });
+
+        if (loginResponse.ok) {
+          const loginData = await loginResponse.json();
+          await setAccessTokenCookie(loginData.access_token); // Set token in cookie
+          await login(loginData.access_token); // Update client-side AuthContext
+          router.push('/volunteer'); // Redirect to dashboard
+        } else {
+          // If auto-login fails, redirect to sign-in with a message
+          const loginErrorData = await loginResponse.json();
+          setError(loginErrorData.detail || 'Registration successful, but failed to log in automatically.');
+          router.push('/auth/sign-in?message=Registration successful. Please sign in manually.');
+        }
       } else {
         const errorData = await response.json();
-        toast({ title: "Sign up failed", description: errorData.detail || "Registration failed", variant: "destructive" });
+        setError(errorData.detail || 'Failed to sign up. Please try again.');
       }
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message || "An unexpected error occurred", variant: "destructive" });
+    } catch (err) {
+      console.error('Sign-up error:', err);
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false)
-  }
+  };
 
   return (
-    <div className="mx-auto max-w-sm px-4 py-10">
-      <h1 className="text-2xl font-semibold mb-4 text-balance">Create account</h1>
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-md space-y-6">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold">Sign Up</h1>
+          <p className="text-muted-foreground">
+            Create your account to start using the Lost & Found System.
+          </p>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="contact">Contact (Email or Phone)</Label>
+            <Input
+              id="contact"
+              type="text"
+              placeholder="you@example.com or +1234567890"
+              required
+              value={contact}
+              onChange={(e) => setContact(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>Role</Label>
+            <RadioGroup value={role} onValueChange={(value: 'VOLUNTEER' | 'ADMIN') => setRole(value)} className="flex space-x-4">
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="VOLUNTEER" id="role-volunteer" disabled={loading} />
+                <Label htmlFor="role-volunteer">Volunteer</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="ADMIN" id="role-admin" disabled={loading} />
+                <Label htmlFor="role-admin">Admin</Label>
+              </div>
+            </RadioGroup>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="consent"
+              checked={consentFaceQr}
+              onCheckedChange={(checked) => setConsentFaceQr(checked as boolean)}
+              disabled={loading}
+            />
+            <Label htmlFor="consent" className="text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+              I consent to facial recognition and QR tagging for lost/found matching.
+            </Label>
+          </div>
+          {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? 'Signing Up...' : 'Sign Up'}
+          </Button>
+        </form>
+        <div className="text-center text-sm text-muted-foreground">
+          Already have an account?{' '}
+          <Link href="/auth/sign-in" className="underline">
+            Sign in
+          </Link>
         </div>
-        <Button disabled={loading} className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white">
-          {loading ? "Signing up..." : "Sign up"}
-        </Button>
-      </form>
-      <p className="text-sm mt-4">
-        Already have an account?{" "}
-        <Link href="/auth/sign-in" className="underline text-blue-600">
-          Sign in
-        </Link>
-      </p>
+      </div>
     </div>
-  )
+  );
 }

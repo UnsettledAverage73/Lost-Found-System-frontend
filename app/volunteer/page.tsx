@@ -1,86 +1,103 @@
 "use client"
 
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ConfidenceBar } from "@/components/confidence-bar"
-import Link from "next/link"
-import { toast } from "@/hooks/use-toast"
-import { listReports } from "@/app/actions/reports"; // Assuming listReports is still relevant
-import { runMatching, setMatchStatus } from "@/app/actions/matching"; // Updated import
-import ProtectedRoute from "@/components/protected-route"; // Import ProtectedRoute
-import useSWR from 'swr'; // Import useSWR
-import { useState, useEffect, useMemo } from 'react'; // Import useState, useEffect, useMemo
-import { useAuth } from "@/lib/auth"; // Import useAuth to get user_id
+import { useState, useEffect } from 'react';
+import useSWR from 'swr'; // For data fetching
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ProtectedRoute } from '@/components/protected-route'; // Import ProtectedRoute
+import { listReports } from '@/app/actions/reports'; // Import server action for reports
+import { useAuth } from '@/lib/auth'; // Import useAuth to get the token for WebSocket
+import { useRouter } from 'next/navigation';
 
-const BACKEND_API_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL;
-const WEBSOCKET_URL = process.env.NEXT_PUBLIC_BACKEND_WEBSOCKET_URL || "ws://localhost:8000/ws"; // Default WebSocket URL
-
-async function fetchStats() {
-  try {
-    const lostReportsResponse = await fetch(`${BACKEND_API_URL}/reports?type=LOST&status=OPEN`);
-    const lostReports = await lostReportsResponse.json();
-    const foundReportsResponse = await fetch(`${BACKEND_API_URL}/reports?type=FOUND&status=OPEN`);
-    const foundReports = await foundReportsResponse.json();
-
-    return {
-      lostCount: lostReports.length || 0,
-      foundCount: foundReports.length || 0,
-    };
-  } catch (error) {
-    console.error("Error fetching stats:", error);
-    return { lostCount: 0, foundCount: 0 };
-  }
+interface Report {
+  _id: string;
+  type: 'LOST' | 'FOUND';
+  subject_type: 'PERSON' | 'ITEM';
+  ref_ids: string[];
+  description_text: string;
+  language: string;
+  photo_ids: string[]; // These are GridFS IDs now
+  location: string;
+  status: 'OPEN' | 'MATCHED' | 'REUNITED' | 'CLOSED';
+  created_at: string; // ISO 8601 string
 }
 
-async function fetchMatches() {
-  try {
-    const response = await fetch(`${BACKEND_API_URL}/matches?status=PENDING`); // Fetch pending matches
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || "Failed to fetch matches");
-    }
-    const data = await response.json();
-    return data || [];
-  } catch (error) {
-    console.error("Error fetching matches:", error);
-    return [];
-  }
+interface Match {
+  _id: string;
+  lost_report_id: string;
+  found_report_id: string;
+  scores: { [key: string]: number };
+  fused_score: number;
+  status: 'PENDING' | 'CONFIRMED_REUNITED' | 'FALSE_MATCH';
+  created_at: string;
 }
 
-function VolunteerDashboardPage() {
-  const { data: stats, mutate: mutateStats } = useSWR("vol-stats", fetchStats)
-  const { data: matches = [], mutate: mutateMatches } = useSWR("vol-matches", fetchMatches)
-  const [filter, setFilter] = useState<"all" | "suggested" | "confirmed" | "rejected">("all")
-  const { user } = useAuth(); // Get user from auth context
+// Define your backend API URL
+const BACKEND_API_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:8000';
+const WEBSOCKET_URL = process.env.NEXT_PUBLIC_WEBSOCKET_URL || 'ws://localhost:8000';
 
+// Fetcher for SWR
+const fetcher = async (url: string, token: string | null) => {
+  if (!token) throw new Error('No authentication token found.');
+  const response = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || 'Failed to fetch data');
+  }
+  return response.json();
+};
+
+export default function VolunteerPage() {
+  const { token, user, isAuthenticated } = useAuth();
+  const router = useRouter();
+
+  // SWR hooks for fetching reports and matches
+  const { data: rawLostReports, error: lostReportsError, isLoading: lostReportsLoading, mutate: mutateLostReports } = useSWR(
+    isAuthenticated && token ? [`${BACKEND_API_URL}/reports/?type=lost`, token] : null,
+    ([url, tokenValue]) => fetcher(url, tokenValue)
+  );
+
+  const { data: rawFoundReports, error: foundReportsError, isLoading: foundReportsLoading, mutate: mutateFoundReports } = useSWR(
+    isAuthenticated && token ? [`${BACKEND_API_URL}/reports/?type=found`, token] : null,
+    ([url, tokenValue]) => fetcher(url, tokenValue)
+  );
+
+  const { data: rawMatches, error: matchesError, isLoading: matchesLoading, mutate: mutateMatches } = useSWR(
+    isAuthenticated && token ? [`${BACKEND_API_URL}/matches`, token] : null,
+    ([url, tokenValue]) => fetcher(url, tokenValue)
+  );
+
+  // Ensure data is always an array
+  const lostReports: Report[] = Array.isArray(rawLostReports) ? rawLostReports : [];
+  const foundReports: Report[] = Array.isArray(rawFoundReports) ? rawFoundReports : [];
+  const matches: Match[] = Array.isArray(rawMatches) ? rawMatches : [];
+
+  // WebSocket for real-time match updates
   useEffect(() => {
-    mutateStats();
-    mutateMatches();
-
-    // Establish WebSocket connection for real-time updates
-    let ws: WebSocket | null = null;
-    if (user?.username) {
-      ws = new WebSocket(`${WEBSOCKET_URL}/${user.username}`);
+    let ws: WebSocket;
+    if (isAuthenticated && user?.id) { // Only connect if authenticated and user ID is available
+      ws = new WebSocket(`${WEBSOCKET_URL}/ws/${user.id}`);
 
       ws.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('WebSocket connected for volunteer dashboard');
       };
 
       ws.onmessage = (event) => {
-        console.log('WebSocket message received:', event.data);
-        // When a new match notification is received, refetch matches
-        if (event.data.startsWith("New match")) {
-          mutateMatches();
-          toast({
-            title: "New Match!",
-            description: "A new potential match has been found.",
-          });
+        const message = JSON.parse(event.data);
+        if (message.type === 'New match') {
+          console.log('New match received:', message.payload);
+          mutateMatches(); // Revalidate matches data
         }
       };
 
       ws.onclose = () => {
-        console.log('WebSocket disconnected');
+        console.log('WebSocket disconnected for volunteer dashboard');
       };
 
       ws.onerror = (error) => {
@@ -89,149 +106,124 @@ function VolunteerDashboardPage() {
     }
 
     return () => {
-      if (ws) {
-        ws.close();
-      }
+      ws?.close();
     };
-  }, [mutateStats, mutateMatches, user]); // Reconnect if user changes
+  }, [isAuthenticated, user?.id, mutateMatches]);
 
-  const list = useMemo(() => {
-    if (!matches) return []
-    if (filter === "all") return matches
-    return matches.filter((m: any) => m.status.toLowerCase() === filter)
-  }, [matches, filter])
+  if (lostReportsError || foundReportsError || matchesError) {
+    return <div className="text-red-500 text-center py-4">Failed to load data. Please try again.</div>;
+  }
 
-  return (
-    <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl md:text-3xl font-semibold">Volunteer Dashboard</h2>
-          <p className="text-sm mt-1">
-            Lost reports: <Badge variant="secondary">{stats?.lostCount ?? 0}</Badge> · Found reports:{" "}
-            <Badge variant="secondary">{stats?.foundCount ?? 0}</Badge>
-            {" · Matches: "}
-            <Badge variant="secondary">{(matches as any[])?.length ?? 0}</Badge>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white"
-            onClick={async () => {
-              await runMatching(); // This will trigger the backend matching job
-              await mutateMatches(); // Refetch matches after running the job
-            }}
-          >
-            Run Match
-          </Button>
-          <a href="/admin" className="text-sm underline">
-            Open advanced dashboard →
-          </a>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Button variant={filter === "all" ? "default" : "outline"} onClick={() => setFilter("all")}>
-          All
-        </Button>
-        <Button variant={filter === "suggested" ? "default" : "outline"} onClick={() => setFilter("suggested")}>
-          Suggested
-        </Button>
-        <Button variant={filter === "confirmed" ? "default" : "outline"} onClick={() => setFilter("confirmed")}>
-          Confirmed
-        </Button>
-        <Button variant={filter === "rejected" ? "default" : "outline"} onClick={() => setFilter("rejected")}>
-          Rejected
-        </Button>
-      </div>
-
-      <section className="grid md:grid-cols-2 gap-4">
-        {list.length === 0 ? (
-          <Card className="rounded-xl">
-            <CardHeader>
-              <CardTitle>No matches yet</CardTitle>
-              <CardDescription>Use “Run Match” to attempt matching Lost and Found reports.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm">You can also review all reports in the advanced dashboard.</div>
-            </CardContent>
-          </Card>
-        ) : (
-          list.map((m: any) => (
-            <Card key={m.id} className="rounded-xl">
-              <CardHeader>
-                <CardTitle className="text-lg">Potential Match</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <img
-                    src={
-                      m.lost?.photo_url ||
-                      m.lost?.photo_base64 ||
-                      "/placeholder.svg?height=160&width=240&query=lost%20photo" ||
-                      "/placeholder.svg" ||
-                      "/placeholder.svg"
-                    }
-                    alt="Lost"
-                    className="w-full h-40 object-cover rounded-lg"
-                  />
-                  <img
-                    src={
-                      m.found?.photo_url ||
-                      m.found?.photo_base64 ||
-                      "/placeholder.svg?height=160&width=240&query=found%20photo" ||
-                      "/placeholder.svg" ||
-                      "/placeholder.svg"
-                    }
-                    alt="Found"
-                    className="w-full h-40 object-cover rounded-lg"
-                  />
-                </div>
-                <ConfidenceBar value={Number(m.confidence || 0)} />
-                <p className="text-sm">
-                  Status: <span className="font-medium capitalize">{m.status}</span>
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button asChild className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white">
-                    <Link href={`/match/${m.id}`}>View Details</Link>
-                  </Button>
-                  <Button
-                    className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
-                    onClick={async () => {
-                      await setMatchStatus(m.id, "confirmed"); // Use setMatchStatus from matching actions
-                      await mutateMatches();
-                      toast({
-                        title: "सूचना भेजी गई",
-                        description: "SMS: ‘आपका बच्चा Rahul Safe Point 2 पर मिल गया है’",
-                      })
-                    }}
-                  >
-                    Confirm Reunited
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="rounded-xl bg-transparent"
-                    onClick={async () => {
-                      await setMatchStatus(m.id, "rejected"); // Use setMatchStatus from matching actions
-                      await mutateMatches();
-                      toast({ title: "Flagged", description: "False match has been flagged for review." })
-                    }}
-                  >
-                    Flag False Match
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </section>
-    </div>
-  )
-}
-
-export default function ProtectedVolunteerDashboardPage() {
+  // Render content only within ProtectedRoute
   return (
     <ProtectedRoute requiredRole="VOLUNTEER">
-      <VolunteerDashboardPage />
+      <div className="min-h-screen p-8">
+        <h1 className="text-4xl font-bold mb-8">Volunteer Dashboard</h1>
+
+        <Tabs defaultValue="overview" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="lost-reports">Lost Reports</TabsTrigger>
+            <TabsTrigger value="found-reports">Found Reports</TabsTrigger>
+            <TabsTrigger value="matches">Matches</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Total Lost Reports</CardTitle>
+                <CardDescription>Number of active lost reports</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-bold">{lostReportsLoading ? '...' : lostReports.length || 0}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Total Found Reports</CardTitle>
+                <CardDescription>Number of active found reports</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-bold">{foundReportsLoading ? '...' : foundReports.length || 0}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Pending Matches</CardTitle>
+                <CardDescription>Matches awaiting review</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-bold">{matchesLoading ? '...' : matches.filter(m => m.status === 'PENDING').length || 0}</p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="lost-reports">
+            <h2 className="text-2xl font-bold mb-4">Lost Reports</h2>
+            {lostReportsLoading && <p>Loading lost reports...</p>}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {lostReports.map((report) => (
+                <Card key={report._id}>
+                  <CardHeader>
+                    <CardTitle>{report.description_text}</CardTitle>
+                    <CardDescription>Type: {report.type} | Subject: {report.subject_type}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p>Location: {report.location}</p>
+                    <p>Status: {report.status}</p>
+                    <p>Created: {new Date(report.created_at).toLocaleDateString()}</p>
+                    {/* Add more report details here */}
+                    <Button variant="outline" className="mt-2" onClick={() => router.push(`/report/${report._id}`)}>View Details</Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="found-reports">
+            <h2 className="text-2xl font-bold mb-4">Found Reports</h2>
+            {foundReportsLoading && <p>Loading found reports...</p>}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {foundReports.map((report) => (
+                <Card key={report._id}>
+                  <CardHeader>
+                    <CardTitle>{report.description_text}</CardTitle>
+                    <CardDescription>Type: {report.type} | Subject: {report.subject_type}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p>Location: {report.location}</p>
+                    <p>Status: {report.status}</p>
+                    <p>Created: {new Date(report.created_at).toLocaleDateString()}</p>
+                    {/* Add more report details here */}
+                    <Button variant="outline" className="mt-2" onClick={() => router.push(`/report/${report._id}`)}>View Details</Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="matches">
+            <h2 className="text-2xl font-bold mb-4">Pending Matches</h2>
+            {matchesLoading && <p>Loading matches...</p>}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {matches.filter(m => m.status === 'PENDING').map((match) => (
+                <Card key={match._id}>
+                  <CardHeader>
+                    <CardTitle>Match ID: {match._id}</CardTitle>
+                    <CardDescription>Fused Score: {(match.fused_score * 100).toFixed(2)}%</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p>Lost Report: {match.lost_report_id}</p>
+                    <p>Found Report: {match.found_report_id}</p>
+                    <p>Status: {match.status}</p>
+                    <Button variant="outline" className="mt-2" onClick={() => router.push(`/match/${match._id}`)}>Review Match</Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
     </ProtectedRoute>
   );
 }
