@@ -2,10 +2,9 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useLanguage } from "./language-provider"
 import { Button } from "./ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu"
-import { Globe, Search, Package, Users, QrCode, MapPin, Sigma as Sitemap } from "lucide-react"
+import { Globe, Search, Package, Users, QrCode, MapPin, Sigma as Sitemap, ListFilter } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AuthUserMenu } from "@/components/auth-user-menu"
 import { AccessibilityControls } from "@/components/accessibility-controls"
@@ -13,7 +12,6 @@ import { useState } from "react"
 
 export function Navbar() {
   const pathname = usePathname()
-  const { language, setLanguage } = useLanguage()
   const [a11yOpen, setA11yOpen] = useState(false)
 
   const nav = [
@@ -24,6 +22,7 @@ export function Navbar() {
     { href: "/workflow", label: "Workflow", icon: Sitemap },
     { href: "/volunteer", label: "Volunteer", icon: Users },
     { href: "/scan", label: "Scan", icon: QrCode },
+    { href: "/feed", label: "Feed", icon: ListFilter }, // Add link to Feed page
   ]
 
   return (
@@ -59,21 +58,6 @@ export function Navbar() {
           >
             Aa
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="rounded-xl bg-transparent">
-                <Globe className="h-4 w-4 mr-2" />
-                {language}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {["English", "Hindi", "Marathi", "Bhojpuri", "Bengali", "Tamil"].map((lang) => (
-                <DropdownMenuItem key={lang} onClick={() => setLanguage(lang as any)}>
-                  {lang}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
           <AuthUserMenu />
           <AccessibilityControls open={a11yOpen} onOpenChange={setA11yOpen} />
         </div>

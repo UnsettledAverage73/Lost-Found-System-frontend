@@ -8,7 +8,6 @@ import { Toaster } from "@/components/ui/toaster"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
 import { OfflineBanner } from "@/components/offline-banner"
-import { LanguageProvider } from "@/components/language-provider"
 import { Suspense } from "react"
 import MobileQuickActions from "@/components/mobile-quick-actions"
 import { OfflineQueueToaster } from "@/components/offline-queue-toaster"
@@ -31,14 +30,12 @@ export default function RootLayout({
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}>
         <Suspense fallback={<div>Loading...</div>}>
           <AuthProvider>
-            <LanguageProvider>
-              <OfflineBanner />
-              <Navbar />
-              <main className="min-h-[calc(100dvh-160px)]">{children}</main>
-              <OfflineQueueToaster />
-              <Footer />
-              <MobileQuickActions />
-            </LanguageProvider>
+            <Navbar />
+            <main className="min-h-[calc(100dvh-160px)]">{children}</main>
+            <OfflineBanner />
+            <OfflineQueueToaster />
+            <Footer />
+            <MobileQuickActions />
           </AuthProvider>
         </Suspense>
         <Toaster />

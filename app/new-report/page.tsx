@@ -9,7 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { createReportFromForm } from '@/app/actions/reports'; // Import the updated action
+import { MapPin } from 'lucide-react'; // Import MapPin icon for location button
+import { useAuth } from '@/lib/auth'; // Import useAuth to get axiosInstance
 
 export default function NewReportPage() {
   const router = useRouter();
@@ -17,7 +18,9 @@ export default function NewReportPage() {
   const [subjectType, setSubjectType] = useState<'PERSON' | 'ITEM'>('ITEM');
   const [description, setDescription] = useState<string>('');
   const [language, setLanguage] = useState<string>('English');
-  const [location, setLocation] = useState<string>('');
+  const [latitude, setLatitude] = useState<string>('');
+  const [longitude, setLongitude] = useState<string>('');
+  const [locationDescription, setLocationDescription] = useState<string>('');
   const [photos, setPhotos] = useState<FileList | null>(null);
 
   // Conditional fields
@@ -28,10 +31,16 @@ export default function NewReportPage() {
   const [personName, setPersonName] = useState<string>('');
   const [personAge, setPersonAge] = useState<string>('');
   const [guardianContact, setGuardianContact] = useState<string>('');
+  const [isChild, setIsChild] = useState<boolean>(false);
+  const [heightCm, setHeightCm] = useState<string>('');
+  const [weightKg, setWeightKg] = useState<string>('');
+  const [identifyingFeatures, setIdentifyingFeatures] = useState<string>('');
+  const [clothingDescription, setClothingDescription] = useState<string>('');
 
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { axiosInstance } = useAuth(); // Get axiosInstance from AuthContext
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -41,11 +50,13 @@ export default function NewReportPage() {
 
     const formData = new FormData();
     formData.append('type', reportType);
-    formData.append('subject_type', subjectType);
-    formData.append('description_text', description);
-    formData.append('language', language);
-    formData.append('location', location);
-    formData.append('ref_ids_str', 'placeholder_id'); // Temporary placeholder, adjust as needed
+    formData.append('subject', subjectType); // Use 'subject' as alias for backend
+    formData.append('desc_text', description); // Use 'desc_text' as alias
+    formData.append('lang', language); // Use 'lang' as alias
+    formData.append('latitude', latitude);
+    formData.append('longitude', longitude);
+    if (locationDescription) formData.append('location_desc', locationDescription);
+    formData.append('refs', 'placeholder_id'); // Temporary placeholder for refs, adjust as needed
 
     if (photos) {
       for (let i = 0; i < photos.length; i++) {
@@ -55,29 +66,39 @@ export default function NewReportPage() {
 
     // Append conditional fields
     if (subjectType === 'ITEM') {
-      formData.append('item_name', itemName);
-      formData.append('item_color', itemColor);
-      formData.append('item_brand', itemBrand);
+      // No direct item_name, item_color, item_brand as form fields in backend reports.py
+      // These should be handled by ref_ids linking to actual Item documents if needed.
+      // For now, these frontend states are not directly sent as form fields.
     } else if (subjectType === 'PERSON') {
-      formData.append('person_name', personName);
-      formData.append('person_age', personAge);
-      formData.append('guardian_contact', guardianContact);
+      // No direct person_name, person_age, guardian_contact as form fields for report in backend reports.py
+      // These details are now part of person_details object in report schema.
+      // The backend expects is_child, height_cm, etc., directly as form fields.
+      formData.append('is_child', String(isChild)); // Convert boolean to string for FormData
+      if (heightCm) formData.append('height_cm', heightCm);
+      if (weightKg) formData.append('weight_kg', weightKg);
+      if (identifyingFeatures) formData.append('identifying_features', identifyingFeatures);
+      if (clothingDescription) formData.append('clothing_description', clothingDescription);
     }
 
     try {
-      const result = await createReportFromForm(formData);
-      if (result.success) {
-        setSuccessMessage(result.message || 'Report submitted successfully!');
-        // Redirect or clear form after a short delay
+      const reportEndpoint = `/reports/${reportType.toLowerCase()}`;
+      const response = await axiosInstance.post(reportEndpoint, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data', // Axios handles this automatically with FormData
+        },
+      });
+
+      if (response.status === 201) { // Assuming 201 Created status for success
+        setSuccessMessage('Report submitted successfully!');
         setTimeout(() => {
-          router.push('/volunteer'); // Redirect to dashboard
+          router.push('/feed'); // Redirect to the new feed page
         }, 2000);
       } else {
-        setError(result.message || 'Failed to submit report.');
+        setError(response.data.detail || 'Failed to submit report.');
       }
     } catch (err: any) {
-      console.error("Client-side error submitting report:", err);
-      setError(err.message || 'An unexpected error occurred during submission.');
+      console.error("Client-side error submitting report:", err.response?.data || err.message || err);
+      setError(err.response?.data?.detail || err.message || 'An unexpected error occurred during submission.');
     } finally {
       setLoading(false);
     }
@@ -161,6 +182,34 @@ export default function NewReportPage() {
               <Label htmlFor="guardianContact">Guardian Contact (Optional)</Label>
               <Input id="guardianContact" value={guardianContact} onChange={(e) => setGuardianContact(e.target.value)} />
             </div>
+            <div className="md:col-span-3"> {/* Span across columns */}
+              <div className="flex items-center space-x-2">
+                <Input
+                  id="isChild"
+                  type="checkbox"
+                  checked={isChild}
+                  onCheckedChange={(checked: boolean) => setIsChild(checked)}
+                  className="h-4 w-4"
+                />
+                <Label htmlFor="isChild">Is this a child (under 18)?</Label>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="heightCm">Height (cm) (Optional)</Label>
+              <Input id="heightCm" type="number" step="0.1" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="weightKg">Weight (kg) (Optional)</Label>
+              <Input id="weightKg" type="number" step="0.1" value={weightKg} onChange={(e) => setWeightKg(e.target.value)} />
+            </div>
+            <div className="md:col-span-2"> {/* This input can span two columns */}
+              <Label htmlFor="identifyingFeatures">Identifying Features (Optional)</Label>
+              <Textarea id="identifyingFeatures" value={identifyingFeatures} onChange={(e) => setIdentifyingFeatures(e.target.value)} />
+            </div>
+            <div className="md:col-span-2"> {/* This input can span two columns */}
+              <Label htmlFor="clothingDescription">Clothing Description (Optional)</Label>
+              <Textarea id="clothingDescription" value={clothingDescription} onChange={(e) => setClothingDescription(e.target.value)} />
+            </div>
           </div>
         )}
 
@@ -190,9 +239,35 @@ export default function NewReportPage() {
 
         {/* Location */}
         <div>
-          <Label htmlFor="location">Location</Label>
-          <Input id="location" value={location} onChange={(e) => setLocation(e.target.value)} required />
+          <Label htmlFor="latitude">Latitude</Label>
+          <Input id="latitude" type="number" step="0.000001" value={latitude} onChange={(e) => setLatitude(e.target.value)} required />
         </div>
+        <div>
+          <Label htmlFor="longitude">Longitude</Label>
+          <Input id="longitude" type="number" step="0.000001" value={longitude} onChange={(e) => setLongitude(e.target.value)} required />
+        </div>
+        <div>
+          <Label htmlFor="locationDescription">Location Description (Optional)</Label>
+          <Input id="locationDescription" value={locationDescription} onChange={(e) => setLocationDescription(e.target.value)} />
+        </div>
+        <Button type="button" variant="outline" onClick={async () => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        setLatitude(position.coords.latitude.toString());
+                        setLongitude(position.coords.longitude.toString());
+                    },
+                    (error) => {
+                        console.error("Error getting location:", error);
+                        setError("Failed to get current location. Please enter manually.");
+                    }
+                );
+            } else {
+                setError("Geolocation is not supported by your browser. Please enter location manually.");
+            }
+        }} className="w-full flex items-center justify-center gap-2">
+            <MapPin className="h-4 w-4" /> Get Current Location
+        </Button>
 
         {/* Photos */}
         <div>

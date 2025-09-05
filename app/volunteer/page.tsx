@@ -139,14 +139,14 @@ export default function VolunteerPage() {
               </CardContent>
             </Card>
             <Card>
-              <CardHeader>
+            <CardHeader>
                 <CardTitle>Total Found Reports</CardTitle>
                 <CardDescription>Number of active found reports</CardDescription>
-              </CardHeader>
-              <CardContent>
+            </CardHeader>
+            <CardContent>
                 <p className="text-4xl font-bold">{foundReportsLoading ? '...' : foundReports.length || 0}</p>
-              </CardContent>
-            </Card>
+            </CardContent>
+          </Card>
             <Card>
               <CardHeader>
                 <CardTitle>Pending Matches</CardTitle>
@@ -223,7 +223,7 @@ export default function VolunteerPage() {
             </div>
           </TabsContent>
         </Tabs>
-      </div>
+    </div>
     </ProtectedRoute>
   );
 }

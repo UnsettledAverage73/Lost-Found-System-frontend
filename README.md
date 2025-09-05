@@ -101,3 +101,30 @@ This approach allows you to develop both parts of the application concurrently, 
 -   `lib/`: Utility functions, authentication context, and helper modules.
 -   `public/`: Static assets such as images and fonts.
 -   `styles/`: Global CSS styles and Tailwind CSS configurations.
+
+## 🌍 Internationalization (i18n)
+
+The frontend supports multiple languages through `react-i18next` and `i18next`.
+
+### Supported Languages
+
+The application currently supports the following languages:
+
+-   **English (en)**
+-   **Hindi (hi)**
+-   **Marathi (mr)**
+-   **Bhojpuri (bh)**
+-   **Bengali (bn)**
+-   **Tamil (ta)**
+
+### Configuration
+
+The i18n configuration is located in `frontend/lib/i18n.ts`. This file initializes `i18next` and loads the translation resources.
+
+### Translation Files
+
+Translation files are stored in `frontend/public/locales/{language_code}/translation.json`. Each `translation.json` file contains key-value pairs for translated strings in the respective language.
+
+### Language Switching
+
+Users can switch languages using the language selector component, typically found in the navigation bar. The selected language is then used for displaying content and is sent to the backend via the `Accept-Language` header for API calls.

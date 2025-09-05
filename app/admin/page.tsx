@@ -147,8 +147,8 @@ export default function AdminPage() {
                 <p className="text-4xl font-bold">{foundReportsLoading ? '...' : foundReports.length || 0}</p>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader>
+        <Card>
+          <CardHeader>
                 <CardTitle>Pending Matches</CardTitle>
                 <CardDescription>Matches awaiting review</CardDescription>
               </CardHeader>
@@ -167,8 +167,8 @@ export default function AdminPage() {
                   <CardHeader>
                     <CardTitle>{report.description_text}</CardTitle>
                     <CardDescription>Type: {report.type} | Subject: {report.subject_type}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
+          </CardHeader>
+          <CardContent>
                     <p>Location: {report.location}</p>
                     <p>Status: {report.status}</p>
                     <p>Created: {new Date(report.created_at).toLocaleDateString()}</p>
@@ -196,8 +196,8 @@ export default function AdminPage() {
                     <p>Created: {new Date(report.created_at).toLocaleDateString()}</p>
                     {/* Add more report details here */}
                     <Button variant="outline" className="mt-2" onClick={() => router.push(`/report/${report._id}`)}>View Details</Button>
-                  </CardContent>
-                </Card>
+          </CardContent>
+        </Card>
               ))}
             </div>
           </TabsContent>
@@ -208,11 +208,11 @@ export default function AdminPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {matches.filter(m => m.status === 'PENDING').map((match) => (
                 <Card key={match._id}>
-                  <CardHeader>
+          <CardHeader>
                     <CardTitle>Match ID: {match._id}</CardTitle>
                     <CardDescription>Fused Score: {(match.fused_score * 100).toFixed(2)}%</CardDescription>
-                  </CardHeader>
-                  <CardContent>
+          </CardHeader>
+          <CardContent>
                     <p>Lost Report: {match.lost_report_id}</p>
                     <p>Found Report: {match.found_report_id}</p>
                     <p>Status: {match.status}</p>

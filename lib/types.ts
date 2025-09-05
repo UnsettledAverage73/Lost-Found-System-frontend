@@ -28,7 +28,8 @@ export interface Match {
   id: string
   lost_report_id: string
   found_report_id: string
-  confidence: number
+  scores: { face?: number; image?: number; text?: number; distance?: number }
+  fused_score: number
   status: MatchStatus
   created_at: string
 }

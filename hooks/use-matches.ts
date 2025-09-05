@@ -1,90 +1,66 @@
 "use client"
 
 import useSWR, { mutate } from "swr"
-import { useReports, type Report } from "./use-reports"
+import { Match } from "@/lib/types" // Import the Match interface
+import { useAuth } from "@/lib/auth" // Import useAuth
 
 export type MatchRecord = {
   id: string
-  lostId: string
-  foundId: string
-  lostPhoto?: string
-  foundPhoto?: string
-  confidence: number // 0..1
-  status: "pending" | "reunited" | "flagged"
-  createdAt: number
+  lost_report_id: string
+  found_report_id: string
+  lostPhotoUrl?: string // URL for the lost report's primary photo
+  foundPhotoUrl?: string // URL for the found report's primary photo
+  fused_score: number // 0..1 from backend
+  status: Match['status'] // Use Match status types
+  created_at: string
+  scores: { face?: number; image?: number; text?: number; distance?: number; } // Include distance score
 }
 
-type MatchesData = { list: MatchRecord[] }
-
-const KEY = "loft:matches"
-
-const fetcher = () => {
-  if (typeof window === "undefined") return { list: [] } as MatchesData
-  try {
-    const raw = localStorage.getItem(KEY)
-    return raw ? (JSON.parse(raw) as MatchesData) : { list: [] }
-  } catch {
-    return { list: [] }
-  }
-}
-
-const save = (data: MatchesData) => {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(data))
-  } catch {}
-}
-
-function randomConfidence() {
-  // 0.55 - 0.98 range
-  return Math.round((0.55 + Math.random() * 0.43) * 100) / 100
-}
-
-function simpleHeuristic(a: Report, b: Report) {
-  // Very naive: language match boosts score, description overlap adds a bit
-  let c = 0.5
-  if (a.language === b.language) c += 0.2
-  const aWords = new Set(a.description.toLowerCase().split(/\W+/).filter(Boolean))
-  const bWords = new Set(b.description.toLowerCase().split(/\W+/).filter(Boolean))
-  const overlap = [...aWords].filter((w) => bWords.has(w)).length
-  c += Math.min(0.3, overlap * 0.05)
-  return Math.min(0.98, Math.max(0.55, c))
-}
+type MatchesData = { list: Match[] } // Use the Match interface directly
 
 export function useMatches() {
-  const { data: reports } = useReports()
-  const { data } = useSWR<MatchesData>(KEY, fetcher, { revalidateOnFocus: false })
-  const current: MatchesData = data || { list: [] }
-
-  const createMatch = () => {
-    if (reports.lost.length === 0 || reports.found.length === 0) return null
-    const lost = reports.lost[0]
-    const found = reports.found[0]
-    const conf = simpleHeuristic(lost, found) || randomConfidence()
-    const rec: MatchRecord = {
-      id: crypto.randomUUID(),
-      lostId: lost.id,
-      foundId: found.id,
-      lostPhoto: lost.photos[0],
-      foundPhoto: found.photos[0],
-      confidence: conf,
-      status: "pending",
-      createdAt: Date.now(),
+  const { axiosInstance, isAuthenticated } = useAuth(); // Get axiosInstance and isAuthenticated
+  const { data, error, isLoading } = useSWR<MatchesData>(
+    isAuthenticated ? ["/api/matches", axiosInstance] : null, // SWR key includes axiosInstance and isAuthenticated
+    async ([key, axiosInstance]) => {
+      if (!axiosInstance) throw new Error("Axios instance not available.");
+      try {
+        const response = await axiosInstance.get(key); // Use axiosInstance to fetch
+        if (response.status === 200) {
+          return { list: response.data || [] };
+        }
+        throw new Error(response.data.detail || "Failed to fetch matches.");
+      } catch (err: any) {
+        throw new Error(err.response?.data?.detail || err.message || "An unexpected error occurred while fetching matches.");
+      }
     }
-    const next: MatchesData = { list: [rec, ...current.list] }
-    save(next)
-    mutate(KEY, next, false)
-    return rec
-  }
+  );
 
-  const updateMatch = (id: string, status: MatchRecord["status"]) => {
-    const next: MatchesData = { list: current.list.map((m) => (m.id === id ? { ...m, status } : m)) }
-    save(next)
-    mutate(KEY, next, false)
-  }
+  const current: MatchesData = data || { list: [] };
+
+  const updateMatch = async (id: string, status: Match['status']) => {
+    if (!axiosInstance) {
+      console.error("Axios instance not available for updating match.");
+      return;
+    }
+    try {
+      const response = await axiosInstance.put(`/matches/${id}/status`, { status });
+      if (response.status === 200) {
+        // Optimistically update the cache and then revalidate
+        mutate(isAuthenticated ? ["/api/matches", axiosInstance] : null, { list: current.list.map((m) => (m.id === id ? { ...m, status } : m)) }, false);
+        mutate(isAuthenticated ? ["/api/matches", axiosInstance] : null); // Revalidate to ensure data consistency
+      } else {
+        console.error("Failed to update match status:", response.data.detail || "Unknown error.");
+      }
+    } catch (err: any) {
+      console.error("Error updating match status:", err.response?.data?.detail || err.message || "An unexpected error occurred.");
+    }
+  };
 
   return {
     data: current,
-    createMatch,
-    updateMatch,
+    updateMatch, // Expose updateMatch
+    isLoading,
+    error,
   }
 }
